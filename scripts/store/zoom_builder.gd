@@ -120,8 +120,35 @@ func _ssbo(binding: int, id: RID) -> RDUniform:
 	return u
 
 
+## Bookkeeping for one batch of parents at one level: per parent, whether its row is written ("write"), an
+## existing row is dropped because the parent came out blank ("drop"), the parent is blank and has no row
+## ("absent") or the stored row already matches ("same"). Every parent of the batch is in "next_keys": every
+## processed parent propagates to the next level regardless of its outcome, because a missing parent can only
+## be created while its children are being processed. If unchanged children stopped propagating, a parent that
+## was never built (or was lost) would stay missing forever, and a higher parent would bake the absence in as a
+## transparent quadrant. "hashes" carries the combined hash of every non-blank parent.
+static func plan_level(batch: Array, combined: Array, old: Dictionary) -> Dictionary:
+	var action: Array[String] = []
+	var hashes: Array[int] = []
+	var next_keys := {}
+	for i in batch.size():
+		var p: Vector2i = batch[i]
+		next_keys[p] = true
+		var px: PackedByteArray = combined[i]
+		if TileCodec.is_blank(px):
+			action.append("drop" if old.has(p) else "absent")
+			hashes.append(0)
+			continue
+		var h := TileCodec.crc_hash(px)
+		hashes.append(h)
+		action.append("same" if old.get(p, -1) == h else "write")
+	return {"action": action, "hashes": hashes, "next_keys": next_keys}
+
+
 ## keys: Vector2i -> true, the zoom-0 tiles that changed. known: Vector2i -> Image (new content) or null (deleted).
-## zoom_all: also re-check every parent that exists (scans whole levels; fixes stale quadrants and orphans).
+## zoom_all: also re-check every parent that exists (scans whole levels; fixes stale quadrants and orphans)
+## and, because every processed parent propagates (plan_level), creates the parents that are missing, so a
+## zoom_all pass leaves no existing tile without its parent.
 func rebuild(keys: Dictionary, known: Dictionary, zoom_max: int, zoom_all: bool, now_ms: int) -> void:
 	var level_keys := keys.duplicate()
 	var level_known := known.duplicate()
@@ -163,24 +190,24 @@ func rebuild(keys: Dictionary, known: Dictionary, zoom_max: int, zoom_all: bool,
 					kids.append(_bytes_of(level_known[c] if level_known.has(c) else fetched.get(c)))
 				kids_list.append(kids)
 			var combined := combine(kids_list)
+			var plan := plan_level(batch, combined, old)
 			var writes := []
 			var drops: Array[Vector2i] = []
 			for i in batch.size():
 				var p: Vector2i = batch[i]
-				var px: PackedByteArray = combined[i]
-				if TileCodec.is_blank(px):
-					if old.has(p):
-						drops.append(p)
-						next_keys[p] = true
-						next_known[p] = null
-					continue
-				var h := TileCodec.crc_hash(px)
-				if old.get(p, -1) == h:
-					continue
-				var webp := TileCodec.encode_webp(Image.create_from_data(T, T, false, Image.FORMAT_RGBA8, px))
-				writes.append({"x": p.x, "y": p.y, "hash": h, "webp": webp})
 				next_keys[p] = true
-				next_known[p] = webp
+				match plan["action"][i]:
+					"write":
+						var webp := TileCodec.encode_webp(Image.create_from_data(T, T, false, Image.FORMAT_RGBA8, combined[i]))
+						writes.append({"x": p.x, "y": p.y, "hash": plan["hashes"][i], "webp": webp})
+						next_known[p] = webp
+					"drop":
+						drops.append(p)
+						next_known[p] = null
+					"absent":
+						next_known[p] = null
+					_:  # "same": the stored row stands; the next level reads it back when it needs it
+						pass
 			store.write(zoom + 1, writes, now_ms)
 			store.delete(zoom + 1, drops)
 			written += writes.size()

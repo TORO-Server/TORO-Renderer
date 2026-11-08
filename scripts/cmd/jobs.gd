@@ -17,6 +17,8 @@ static func scan(args: Args) -> int:
 		push_error("cannot write %s" % out)
 		return 1
 	Term.say("scan: %d non-empty chunks, y %d..%d, %.1f s" % [s.count(), s.min_y(), s.max_y(), (Time.get_ticks_msec() - t0) / 1000.0])
+	if s.unreadable > 0:
+		Term.say("warning: %d chunks could not be read and are not in the scan" % s.unreadable)
 	return 0
 
 

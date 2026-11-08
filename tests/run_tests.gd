@@ -24,6 +24,7 @@ func _initialize() -> void:
 	_test_chunk()
 	_test_gpu_pack()
 	_test_scan()
+	_test_zoom_plan()
 	_test_jar()
 	_test_registry()
 	_test_config()
@@ -382,9 +383,48 @@ func _test_scan() -> void:
 	var deflated := nbt.compress(FileAccess.COMPRESSION_DEFLATE)
 	_write(dir.path_join("r.0.0.mca"), _region_with(2, deflated.size() + 1, 2, deflated))
 	_write(dir.path_join("r.999999.0.mca"), _region_with(2, deflated.size() + 1, 2, deflated))
+	var garbage := PackedByteArray([0x63, 0x00, 0x00, 0xFF, 0x42])
+	_write(dir.path_join("r.1.0.mca"), _region_with(2, garbage.size() + 1, 3, garbage))
 	var scan := ScanCache.build(ProjectSettings.globalize_path(dir))
 	_eq("scan keeps only region files inside the world border", scan.count(), 1)
+	_eq("scan counts chunks it cannot read instead of dropping them silently", scan.unreadable, 1)
 	_eq("scan ignores a section outside the Y range", [scan.min_y(), scan.max_y()], [0, 16])
+
+
+func _solid_tile(r: int, g: int, b: int, a: int) -> PackedByteArray:
+	var px := PackedByteArray()
+	px.resize(128 * 128 * 4)
+	for i in range(0, px.size(), 4):
+		px[i] = r
+		px[i + 1] = g
+		px[i + 2] = b
+		px[i + 3] = a
+	return px
+
+
+func _test_zoom_plan() -> void:
+	var blank := PackedByteArray()
+	blank.resize(128 * 128 * 4)
+	var red := _solid_tile(255, 0, 0, 255)
+	var blue := _solid_tile(0, 0, 255, 255)
+	var p_write := Vector2i(1, 0)
+	var p_same := Vector2i(2, 0)
+	var p_drop := Vector2i(3, 0)
+	var p_absent := Vector2i(4, 0)
+	var batch: Array = [p_write, p_same, p_drop, p_absent]
+	var combined: Array = [red, blue, blank, blank]
+	var old := {p_same: TileCodec.crc_hash(blue), p_drop: 12345}
+	var plan := ZoomBuilder.plan_level(batch, combined, old)
+	_eq("zoom plan writes a parent that has no row", plan["action"][0], "write")
+	_eq("zoom plan keeps a parent whose row matches", plan["action"][1], "same")
+	_eq("zoom plan drops a blank parent that has a row", plan["action"][2], "drop")
+	_eq("zoom plan marks a blank parent without a row absent", plan["action"][3], "absent")
+	_eq("zoom plan carries the hash of a written parent", plan["hashes"][0], TileCodec.crc_hash(red))
+	# Regression: every parent must propagate to the next level, whatever its outcome. When only changed
+	# parents propagated, a missing parent of unchanged children was never created and the absence was
+	# baked into higher levels as transparent quadrants (the black tiles of 2026-11-08).
+	for p in batch:
+		_ok("zoom plan propagates %s to the next level" % p, plan["next_keys"].has(p))
 
 
 # --- build-data's jar reader -----------------------------------------------------------------------------------------
