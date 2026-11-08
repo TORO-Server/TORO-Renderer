@@ -43,7 +43,8 @@ func renderer(persp_name: String, region_dir: String) -> IsoRenderer:
 
 
 ## Renders each mega tile (mega x mega tiles) -> Vector2i -> null (blank) or {"img": Image, "hash": int}.
-## A mega tile that could not be drawn adds nothing, so its existing rows stay as they are.
+## A mega tile that could not be drawn adds nothing, so its existing rows stay as they are; the failure is
+## logged, because a silent skip here is how a tile goes missing without a trace.
 func render_megas(iso: IsoRenderer, megas: Array[Vector2i], mega: int, min_y: int, max_y: int) -> Dictionary:
 	var tiles := {}
 	iso.min_y = min_y
@@ -52,6 +53,7 @@ func render_megas(iso: IsoRenderer, megas: Array[Vector2i], mega: int, min_y: in
 		iso.next_generation()
 		var images := iso.render(m.x * mega, m.y * mega, mega, mega)
 		if images.is_empty():
+			Term.say("warning: mega tile %s could not be rendered; its tiles are unchanged" % m)
 			continue
 		var i := 0
 		for ty in mega:

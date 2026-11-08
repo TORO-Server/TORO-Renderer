@@ -41,6 +41,8 @@ func run() -> int:
 		if not scan.save(cache_path):
 			return _fail("cannot write scan cache %s" % cache_path)
 		Term.say("scan: %d non-empty chunks, %.1f s" % [scan.count(), (Time.get_ticks_msec() - t0) / 1000.0])
+		if scan.unreadable > 0:
+			Term.say("warning: %d chunks could not be read; they are not in the plan and their tiles stay as they are" % scan.unreadable)
 	if scan.count() == 0:
 		return _fail("nothing to render in %s" % map.region_dir)
 

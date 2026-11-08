@@ -4,9 +4,14 @@ extends RefCounted
 ## cache format: four int32 per chunk.
 
 var quads := PackedInt32Array()
+## Chunks that are present in a region file but could not be read (broken data, or a chunk the game
+## stored in an external file). They are not in the plan, so their tiles are never rendered by a run
+## job; the count is reported so the loss is not silent.
+var unreadable := 0
 
 var _files: Array = []
 var _results: Array = []
+var _skipped: Array = []
 
 
 static func load_file(path: String) -> ScanCache:
@@ -54,10 +59,13 @@ static func build(region_dir: String) -> ScanCache:
 			c._files.append([rc[0], rc[1], region_dir.path_join(f)])
 	c._files.sort()
 	c._results.resize(c._files.size())
+	c._skipped.resize(c._files.size())
 	var gid := WorkerThreadPool.add_group_task(c._scan_region, c._files.size(), -1, true, "scan regions")
 	WorkerThreadPool.wait_for_group_task_completion(gid)
 	for r in c._results:
 		c.quads.append_array(r)
+	for s in c._skipped:
+		c.unreadable += int(s)
 	return c
 
 
@@ -65,14 +73,20 @@ func _scan_region(i: int) -> void:
 	var info: Array = _files[i]
 	var rg := WorldReader.read_region(info[2])
 	var out := PackedInt32Array()
+	var skipped := 0
 	if rg.size() >= 8192:
 		for lz in 32:
 			for lx in 32:
 				var raw := WorldReader.raw_chunk(rg, lx, lz)
 				if raw.is_empty():
+					# the location entry says a chunk is stored here but it could not be read
+					# (broken compression, or a chunk the game moved to an external file)
+					if rg[lx * 4 + lz * 128 + 3] != 0:
+						skipped += 1
 					continue
 				var root := Nbt.parse(raw)
 				if root.is_empty():
+					skipped += 1
 					continue
 				var status = root.get("Status", "")
 				if status is String and status != "minecraft:full" and status != "full" and status != "":
@@ -99,6 +113,7 @@ func _scan_region(i: int) -> void:
 					out.append(lo)
 					out.append(hi)
 	_results[i] = out
+	_skipped[i] = skipped
 
 
 static func _is_air(v: Variant) -> bool:
