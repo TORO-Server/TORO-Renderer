@@ -25,6 +25,10 @@ const MAX_ATTEMPTS := 3
 const HOT_HEAT := 3
 ## Rank penalty per heat: one heat pushes a mega about this many mega tiles away from the players.
 const HEAT_DISTANCE := 2.0
+## The heat penalty stops growing here: past HOT_HEAT a mega tile is already as hot as it gets, and an
+## uncapped penalty would sink a spot that changes all the time (a fire, say) behind everything else
+## until it goes stale, no matter how long it has already waited within that window.
+const HEAT_PENALTY_CAP := 6.0  # HOT_HEAT * HEAT_DISTANCE
 
 class MapState:
 	var def: MapDef
@@ -237,17 +241,25 @@ func _drain_dirty(now: float) -> void:
 	if dirty_feed == null:
 		return
 	var events: Dictionary = dirty_feed.drain()
+	var received: Array = dirty_feed.received_counts()
+	var added_total := 0
 	for world: String in events:
 		var matched := false
 		for ms in maps:
 			if ms.def.world == world:
 				matched = true
 				var added := _offer(ms, events[world], now, true)
+				added_total += added
 				if added > 0:
 					Term.say("map %d: events queued %d new mega tiles (%d pending)" % [ms.def.id, added, ms.pending.size()])
 				_save(ms)
 		if not matched:
 			Term.say("dirty events for unknown world '%s' dropped" % world)
+	# Receipt and queueing are different facts: a cycle that received events says so even when every
+	# mega tile was already pending (added == 0), so "nothing arrived" and "arrived, already queued"
+	# can be told apart in the log.
+	if int(received[0]) > 0:
+		Term.say("dirty feed: %d messages / %d chunks received, %d new mega tiles (%d pending)" % [int(received[0]), int(received[1]), added_total, _pending_total()])
 
 
 ## smaller = sooner
@@ -261,7 +273,7 @@ func _rank(ms: MapState, m: Vector2i, queued: float, now: float) -> float:
 			var mp := ms.persp.world_to_map(float(p["x"]), float(p["y"]), float(p["z"]))
 			best = minf(best, Vector2(m.x + 0.5 - mp[0] / side, m.y + 0.5 - mp[1] / side).length())
 	# a mega tile that keeps changing counts as farther away, so the rest of the map goes first
-	return best + queued * 1e-10 + float(int(ms.heat.get(m, 0))) * HEAT_DISTANCE
+	return best + queued * 1e-10 + minf(float(int(ms.heat.get(m, 0))) * HEAT_DISTANCE, HEAT_PENALTY_CAP)
 
 
 ## Coroutine: `await watch.run()`.

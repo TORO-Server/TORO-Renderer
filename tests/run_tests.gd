@@ -695,6 +695,11 @@ func _test_dirty_feed() -> void:
 	_eq("token authenticates", c["authed"], true)
 	feed._message(c, '{"t":"dirty","worlds":{"main":{"bukkit":[[0,0],[1,1]]}}}')
 	_eq("dirty after auth is queued", feed.queued(), 2)
+	_eq("received counted", feed.received_counts(), [1, 2])
+	_eq("received counts reset by reading", feed.received_counts(), [0, 0])
+	feed._message(c, '{"t":"dirty","worlds":{"main":{"bukkit":[[0,0]]}}}')
+	_eq("a repeat dirty counts as received", feed.received_counts(), [1, 1])
+	_eq("a repeat dirty queues nothing new", feed.queued(), 2)
 	var drained := feed.drain()
 	_eq("drained world", drained.keys(), ["main"])
 	_eq("queue empty after drain", feed.queued(), 0)
@@ -726,6 +731,12 @@ func _test_watch_flood() -> void:
 	_eq("heat counted", int(ms.heat.get(mega, 0)), 1)
 	job._offer(ms, chunks, now + 60.0, false)
 	_eq("the scan adds no heat", int(ms.heat.get(mega, 0)), 1)
+
+	# heat penalty cap: heat far past the cap ranks the same as heat at the cap
+	ms.heat[mega] = WatchJob.HOT_HEAT
+	var rank_at_cap := job._rank(ms, mega, now, now)
+	ms.heat[mega] = 1000
+	_eq("heat penalty is capped", job._rank(ms, mega, now, now), rank_at_cap)
 
 	# cooldown: a mega inside its cooldown is skipped, a stale one is not
 	ms.pending.clear()
