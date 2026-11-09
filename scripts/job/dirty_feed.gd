@@ -14,12 +14,20 @@ const MAX_CLIENTS := 8
 const MAX_WORLDS := 64
 const MAX_CHUNKS_PER_MESSAGE := 1_000_000
 const AUTH_MSEC := 10_000
+## A peer that stays in STATE_CLOSING longer than this is dropped: it never finished its close
+## handshake, and left alone it would hold one of the MAX_CLIENTS slots forever.
+const CLOSING_MSEC := 5_000
 
 var _server := TCPServer.new()
 var _token := ""
-var _clients: Array = []  # {peer: WebSocketPeer, authed: bool, deadline: int (ticks msec)}
+var _clients: Array = []  # {peer: WebSocketPeer, authed: bool, deadline: int (ticks msec), closing_since: int}
 var _queue := {}  # world -> {Vector2i: true}
 var _connected := false
+## Authenticated dirty messages and their chunks since the last received_counts() call. The queue
+## alone cannot show receipt: chunks for mega tiles the watch already queued leave no trace in it.
+var _received_messages := 0
+var _received_chunks := 0
+var _auth_rejected := 0
 
 
 ## Starts listening. Returns false (and never listens) without a token or when the port is taken.
@@ -52,7 +60,7 @@ func poll() -> void:
 		var peer := WebSocketPeer.new()
 		if peer.accept_stream(_server.take_connection()) != OK:
 			continue
-		_clients.append({"peer": peer, "authed": false, "deadline": Time.get_ticks_msec() + AUTH_MSEC})
+		_clients.append({"peer": peer, "authed": false, "deadline": Time.get_ticks_msec() + AUTH_MSEC, "closing_since": 0})
 	var now := Time.get_ticks_msec()
 	var alive: Array = []
 	for c in _clients:
@@ -60,6 +68,7 @@ func poll() -> void:
 		peer.poll()
 		match peer.get_ready_state():
 			WebSocketPeer.STATE_OPEN:
+				c["closing_since"] = 0
 				while peer.get_available_packet_count() > 0:
 					_message(c, peer.get_packet().get_string_from_utf8())
 				alive.append(c)
@@ -69,7 +78,14 @@ func poll() -> void:
 				else:
 					alive.append(c)
 			WebSocketPeer.STATE_CLOSING:
-				alive.append(c)
+				var since := int(c.get("closing_since", 0))
+				if since == 0:
+					c["closing_since"] = now
+					alive.append(c)
+				elif now - since > CLOSING_MSEC:
+					peer.close()
+				else:
+					alive.append(c)
 	_clients = alive
 
 
@@ -81,16 +97,22 @@ func _message(c: Dictionary, text: String) -> void:
 		if msg.get("t") is String and msg["t"] == "auth" and msg.get("token") is String and msg["token"] == _token:
 			c["authed"] = true
 		else:
+			_auth_rejected += 1
+			Term.say("dirty feed: auth rejected (%d total)" % _auth_rejected)
 			(c["peer"] as WebSocketPeer).close()
 		return
 	if msg.get("t") is String and msg["t"] == "dirty":
 		var parsed := parse_dirty(msg)
+		var n := 0
 		for world: String in parsed:
+			n += (parsed[world] as Array).size()
 			if not _queue.has(world):
 				_queue[world] = {}
 			var seen: Dictionary = _queue[world]
 			for chunk in parsed[world]:
 				seen[chunk] = true
+		_received_messages += 1
+		_received_chunks += n
 
 
 ## The chunks of one dirty message: world -> Array[Vector2i]. Bad entries are dropped, and a message is
@@ -153,6 +175,16 @@ func queued() -> int:
 	for world: String in _queue:
 		n += (_queue[world] as Dictionary).size()
 	return n
+
+
+## [messages, chunks] received from authenticated connections since the last call; resets both
+## counters. Read it together with drain(), once per watch cycle: receipt is the fact that a
+## message arrived at all, which the queue cannot show (see _received_messages).
+func received_counts() -> Array:
+	var out := [_received_messages, _received_chunks]
+	_received_messages = 0
+	_received_chunks = 0
+	return out
 
 
 ## Connections that completed the token check.
