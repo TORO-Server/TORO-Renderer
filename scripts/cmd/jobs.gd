@@ -45,7 +45,7 @@ static func run(args: Args) -> int:
 
 
 ## `watch --config maps.json [--map-id N,...] [--interval S] [--max-megas N] [--max-load L] [--stale-after S] [--once]`
-##      [--mega-cooldown S] [--bbox-threshold N] [--dirty-port N] [--dirty-token-file F]`
+##      [--mega-cooldown S] [--bbox-threshold N] [--dirty-port N] [--dirty-token-file F] [--api-port N]`
 ## Resident updater for every map of the config. The dirty feed (block-change events from the game server)
 ## listens only when both a port and a token are set: the token comes from TORO_DIRTY_TOKEN or the file.
 static func watch(args: Args) -> int:
@@ -83,14 +83,27 @@ static func watch(args: Args) -> int:
 			var dirty := DirtyFeed.new()
 			if dirty.start(dirty_port, token):
 				job.dirty_feed = dirty
+	var api_port := args.integer("api-port", 0)
+	if api_port > 0:
+		var api := ShotApi.new()
+		api.pool = pool
+		if not api.start(api_port):
+			return 1
+		job.api = api
+
 	var state_dir := args.text("state-dir", "/state")
 	for e in ctx.cfg["maps"]:
 		var map := MapDef.from_entry(e)
 		if not wanted.is_empty() and not wanted.has(map.id):
 			continue
+		if job.api != null:
+			job.api.register(map)
 		if not ctx.store.ensure_connected():
 			Term.say("database unreachable: " + ctx.store.error)
-			return 1
+			if job.api == null:
+				return 1
+			# with the render API on, the map is still served; only its tile updates wait
+			continue
 		ctx.store.map_id = map.id
 		map.world = ctx.store.world_name()
 		if ctx.feed != null:

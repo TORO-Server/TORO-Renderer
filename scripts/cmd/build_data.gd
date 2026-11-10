@@ -109,6 +109,7 @@ func _build(jar: String, out: String, reports: String) -> int:
 				continue
 			tex_names.append(n.substr("assets/minecraft/textures/".length(), n.length() - "assets/minecraft/textures/".length() - 4))
 			data.append_array(t)
+	_extract_entity_sheets(out, data, tex_names)
 	_write(out.path_join("textures.bin"), data)
 	_write_json(out.path_join("textures.json"), tex_names)
 	var defaults := {}
@@ -395,3 +396,54 @@ static func _parse_color(v: Variant) -> Variant:
 	if v is String:
 		return ("0x" + v.lstrip("#")).hex_to_int()
 	return null
+
+
+# --- entity sheets ------------------------------------------------------------------------------------------------
+
+## Sheets the client uses for block entities (chests, banners, shulker boxes, heads). They live
+## outside textures/block, so they are cut into 16x16 tiles here and appended to the texture
+## table as "entity/<sheet>#<tx>,<ty>"; entity_textures.json records each sheet's size in tiles
+## for the state registry's block-entity baker.
+const ENTITY_SHEETS := [
+	"entity/chest/normal", "entity/chest/normal_left", "entity/chest/normal_right",
+	"entity/chest/trapped", "entity/chest/trapped_left", "entity/chest/trapped_right",
+	"entity/chest/ender",
+	"entity/chest/copper", "entity/chest/copper_left", "entity/chest/copper_right",
+	"entity/chest/copper_exposed", "entity/chest/copper_exposed_left", "entity/chest/copper_exposed_right",
+	"entity/chest/copper_weathered", "entity/chest/copper_weathered_left", "entity/chest/copper_weathered_right",
+	"entity/chest/copper_oxidized", "entity/chest/copper_oxidized_left", "entity/chest/copper_oxidized_right",
+	"entity/banner/banner_base",
+	"entity/shulker/shulker",
+	"entity/shulker/shulker_white", "entity/shulker/shulker_light_gray", "entity/shulker/shulker_gray",
+	"entity/shulker/shulker_black", "entity/shulker/shulker_brown", "entity/shulker/shulker_red",
+	"entity/shulker/shulker_orange", "entity/shulker/shulker_yellow", "entity/shulker/shulker_lime",
+	"entity/shulker/shulker_green", "entity/shulker/shulker_cyan", "entity/shulker/shulker_light_blue",
+	"entity/shulker/shulker_blue", "entity/shulker/shulker_purple", "entity/shulker/shulker_magenta",
+	"entity/shulker/shulker_pink",
+	"entity/skeleton/skeleton", "entity/skeleton/wither_skeleton",
+	"entity/zombie/zombie", "entity/creeper/creeper", "entity/piglin/piglin",
+	"entity/enderdragon/dragon", "entity/player/wide/steve",
+]
+
+
+func _extract_entity_sheets(out_dir: String, data: PackedByteArray, tex_names: Array) -> void:
+	var manifest := {}
+	var skipped := 0
+	for sheet in ENTITY_SHEETS:
+		var path: String = "assets/minecraft/textures/" + sheet + ".png"
+		if not _jar.has(path):
+			skipped += 1
+			continue
+		var img := _load_rgba(_jar.read(path))
+		if img.get_width() == 0 or img.get_width() % 16 != 0 or img.get_height() % 16 != 0:
+			skipped += 1
+			continue
+		var txs := img.get_width() / 16
+		var tys := img.get_height() / 16
+		for ty in tys:
+			for tx in txs:
+				tex_names.append("%s#%d,%d" % [sheet, tx, ty])
+				data.append_array(img.get_region(Rect2i(tx * 16, ty * 16, 16, 16)).get_data())
+		manifest[sheet] = [txs, tys]
+	_write_json(out_dir.path_join("entity_textures.json"), manifest)
+	print("entity sheets %d (skipped %d)" % [manifest.size(), skipped])

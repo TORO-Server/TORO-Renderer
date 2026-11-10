@@ -52,6 +52,8 @@ var gate: Gate
 var feed: LiveFeed
 ## Block-change events from the game server; null when the feed is off.
 var dirty_feed: DirtyFeed
+## the render API front (docs/render-api.md); null when watch runs without --api-port
+var api: ShotApi
 var interval := 60.0
 var overlap := 30.0
 var max_megas := 4
@@ -285,6 +287,8 @@ func run() -> int:
 		for ms in maps:
 			_scan(ms, cycle)
 			_save(ms)
+		if api != null:
+			api.serve_step()
 		var rendered := false
 		var why := gate.reason()
 		if why == "":
@@ -294,10 +298,28 @@ func run() -> int:
 		if once:  # one look, at most one batch
 			return 0
 		if not rendered:
-			await Term.sleep(maxf(1.0, interval - (Time.get_unix_time_from_system() - cycle)))
+			await _rest(maxf(1.0, interval - (Time.get_unix_time_from_system() - cycle)))
 		else:
-			await Term.sleep(0.5)  # lets the main loop breathe between batches
+			await _rest(0.5)  # lets the main loop breathe between batches
 	return 0
+
+
+## Rests in short slices so render requests that arrive meanwhile are picked up
+## promptly: bytes move every slice, the render queue is served about once a second,
+## so an evidence request is answered within a second plus its render time even in
+## the middle of a long rest, while batch requests still trickle through serve_step.
+func _rest(seconds: float) -> void:
+	var left := seconds
+	var slices := 0
+	while left > 0.0:
+		await Term.sleep(minf(left, 0.1))
+		left -= 0.1
+		slices += 1
+		if api != null:
+			if slices % 10 == 0:
+				api.serve_step()
+			else:
+				api.poll()
 
 
 func _pending_total() -> int:

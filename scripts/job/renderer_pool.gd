@@ -8,6 +8,7 @@ var reg: StateRegistry
 var table: BlockTable
 var device_name := ""
 var _renderers := {}
+var _shot_renderers := {}
 
 
 static func create(data_dir: String) -> RendererPool:
@@ -40,6 +41,18 @@ func renderer(persp_name: String, region_dir: String) -> IsoRenderer:
 		return null
 	_renderers[key] = iso
 	return iso
+
+
+## One ShotRenderer per region directory (perspective stills; docs/render-api.md).
+func shot_renderer(region_dir: String) -> ShotRenderer:
+	if _shot_renderers.has(region_dir):
+		return _shot_renderers[region_dir]
+	var sr := ShotRenderer.new()
+	sr.rd = rd
+	if not sr.setup_shot(reg, table, WorldReader.new(region_dir, table)):
+		return null
+	_shot_renderers[region_dir] = sr
+	return sr
 
 
 ## Renders each mega tile (mega x mega tiles) -> Vector2i -> null (blank) or {"img": Image, "hash": int}.

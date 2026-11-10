@@ -67,6 +67,7 @@ docs/               詳細な文書
 | [docs/architecture.md](docs/architecture.md) | 描画パイプライン、各モジュールの役割、設計上の判断 |
 | [docs/operations.md](docs/operations.md) | セットアップ、マップ設定、全体ジョブ、常駐更新、プレイヤー位置の WebSocket、本番運用の安全策 |
 | [docs/commands.md](docs/commands.md) | コマンドごとのオプション一覧 |
+| [docs/render-api.md](docs/render-api.md) | 透視カメラの静止画と、watch が待ち受ける描画要求 API（英語） |
 | [docs/igpu-report.md](docs/igpu-report.md) | 内蔵 GPU の調査と計測の報告（英語、2026-11-04 時点） |
 
 ## 既知の差異
