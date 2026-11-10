@@ -106,7 +106,13 @@ func chunk(cx: int, cz: int) -> ChunkData:
 		c = ChunkData.decode(raw, cx, cz, table, registry)
 		stats["chunks"] += 1
 		stats["chunk_ms"] += (Time.get_ticks_usec() - t0) / 1000.0
-	_chunks[key] = c
+	# A chunk that could not be read or decoded is NOT cached. The world is live: a read can race the
+	# game saving the region file, and pinning that failure would blank the chunk's tiles for the rest
+	# of the run -- the publisher then treats them as legitimately empty and the hole survives every
+	# later pass over the same data. Absent chunks cost one header lookup per retry, which is cheap
+	# against the cached region image.
+	if c != null:
+		_chunks[key] = c
 	return c
 
 

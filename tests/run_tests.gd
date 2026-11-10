@@ -25,6 +25,8 @@ func _initialize() -> void:
 	_test_gpu_pack()
 	_test_scan()
 	_test_zoom_plan()
+	_test_world_reader_cache()
+	_test_still_megas()
 	_test_jar()
 	_test_registry()
 	_test_config()
@@ -425,6 +427,53 @@ func _test_zoom_plan() -> void:
 	# baked into higher levels as transparent quadrants (the black tiles of 2026-11-08).
 	for p in batch:
 		_ok("zoom plan propagates %s to the next level" % p, plan["next_keys"].has(p))
+
+
+func _region_two_chunks(body0: PackedByteArray, body1: PackedByteArray) -> PackedByteArray:
+	var rg := PackedByteArray()
+	rg.resize(8192 + 8192)
+	rg.fill(0)
+	rg[2] = 2
+	rg[3] = 1  # chunk (0,0) at sector 2
+	rg[6] = 3
+	rg[7] = 1  # chunk (1,0) at sector 3
+	for i in 2:
+		var body: PackedByteArray = [body0, body1][i]
+		var off := 8192 + i * 4096
+		var sp := _be()
+		sp.put_32(body.size() + 1)
+		sp.put_u8(3)
+		sp.put_data(body)
+		var frame := sp.data_array
+		for j in frame.size():
+			rg[off + j] = frame[j]
+	return rg
+
+
+func _test_world_reader_cache() -> void:
+	var dir := TMP.path_join("reader")
+	DirAccess.make_dir_recursive_absolute(dir)
+	var garbage := PackedByteArray([0x63, 0x00, 0x00, 0xFF, 0x42])
+	var valid := _chunk_nbt([_section(0, ["minecraft:stone"])])
+	_write(dir.path_join("r.0.0.mca"), _region_two_chunks(garbage, valid))
+	var reader := WorldReader.new(ProjectSettings.globalize_path(dir), BlockTable.new())
+	reader.registry = _registry()
+	_eq("unreadable chunk reads as absent", reader.chunk(0, 0), null)
+	# Regression: a failed read must not be pinned in the cache. On a live world a read can race the
+	# game saving the region file; caching the failure blanked the chunk's tiles for the rest of a run
+	# and the holes survived every later pass (2026-11-10).
+	_ok("a failed chunk read is not cached", not reader._chunks.has(Vector2i(0, 0)))
+	_ok("valid chunk decodes", reader.chunk(1, 0) != null)
+	_ok("a decoded chunk is cached", reader._chunks.has(Vector2i(1, 0)))
+	_eq("absent chunk reads as absent", reader.chunk(5, 5), null)
+	_ok("an absent chunk is not cached either", not reader._chunks.has(Vector2i(5, 5)))
+
+
+func _test_still_megas() -> void:
+	var blank_missing: Array[Vector2i] = [Vector2i(512, -21), Vector2i(513, -20), Vector2i(520, -21), Vector2i(-1, -1)]
+	var still := Publisher.still_megas(blank_missing, 8)
+	_eq("still-missing tiles group by mega tile", still, {Vector2i(64, -3): 2, Vector2i(65, -3): 1, Vector2i(-1, -1): 1})
+	_eq("no still-missing tiles, no mega tiles", Publisher.still_megas([], 8), {})
 
 
 # --- build-data's jar reader -----------------------------------------------------------------------------------------
