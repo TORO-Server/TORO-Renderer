@@ -85,6 +85,7 @@ godot --path . -s scripts/main.gd -- <コマンド> [--オプション 値] [--�
 | `--dirty-port N` | 0 | ゲームサーバー（TORO-Core の map-dirty）からのブロック変更イベントを受ける WebSocket のポート。0 で無効 |
 | `--dirty-token-file F` |  | イベントの token を読むファイル（環境変数 `TORO_DIRTY_TOKEN` が優先）。`--dirty-port` と token の両方がそろったときだけ受ける |
 | `--once` |  | 1 回見て、最大 1 バッチだけ処理して終了（試験用） |
+| `--api-port N` |  | 描画要求 API（`docs/render-api.md`）をこのポートで待ち受ける。データベースに届かなくても API は動き続ける |
 
 イベントは待ち行列に合流し、すでに入っているメガタイルは最初に入った時刻のままになる。繰り返し変わるメガタイルは
 「熱い」と数えて順位を下げ、1 バッチに入る数も半分（最低 1）までに抑える。どのバッチでも最古の 1 件は必ず席を得る。
@@ -95,12 +96,35 @@ godot --path . -s scripts/main.gd -- <コマンド> [--オプション 値] [--�
 `zoom --map-id N --zoom-max Z (--all | --seed FILE)`: 描かずに zoom-out を再構築する。`FILE` は 1 行に 1 タイル
 （`x y`、zoom 0）。
 
+## `shot`
+
+`shot --region-dir DIR --out FILE.png [オプション]`: 透視カメラで 1 枚の静止画を描き、PNG と変換情報の
+JSON（`<ファイル名>.json`）を出す。カメラと API の仕様は `docs/render-api.md`。
+
+| オプション | 既定 | 内容 |
+| --- | --- | --- |
+| `--out FILE` |  | 出力する PNG（必須）。変換情報は同じ場所へ `.json` で出す |
+| `--map NAME`, `--map-id N` |  | `--config` のマップを名前か ID で選ぶ |
+| `--region-dir DIR` | マップの設定 | ワールドの region ディレクトリ（マップより優先） |
+| `--target x,y,z` | 0,70,0 | 注視点（軌道カメラ） |
+| `--distance N` | 120 | 注視点からカメラまでの距離 |
+| `--rotation N` | 0 | 方位（ラジアン） |
+| `--angle N` | 0.75 | 見下ろし角（ラジアン。0 が真下） |
+| `--fov N` | 75 | 垂直の画角（度） |
+| `--eye x,y,z`, `--look-at x,y,z` |  | 軌道カメラの代わりにカメラ位置と注視点を直接指定 |
+| `--size WxH` | 1280x720 | 画像の大きさ |
+| `--no-adjust-height` |  | 注視点の高さの自動調整（BlueMap と同じ規則）をしない |
+| `--background r,g,b[,a]` | 透明 | 何も描かれなかった所の色（0-255） |
+| `--min-y`, `--max-y` | マップの設定 | 描画する高さの範囲 |
+| `--data-dir DIR` | `res://data` | `build-data` の出力 |
+
 ## `build-data`
 
 `build-data --jar FILE [--reports FILE] [--out DIR]`: クライアント jar から次を作る（`--out` の既定は `res://data`）。
 
 - `blocks.json`, `atlas.bin`, `atlas.json`, `biomes.json`: 列単位の表（`BlockTable`）
 - `assets/blockstates/*.json`, `assets/models/block/**.json`, `textures.bin`, `textures.json`: ブロックモデル（`StateRegistry`）
+- `entity_textures.json`: ブロックエンティティ（チェスト、旗、頭、シュルカーボックス）のテクスチャシートの大きさ。シートのタイルも `textures.bin` / `textures.json` へ入る
 - `block_defaults.json`: ブロックの既定プロパティ（`--reports` が要る）
 
 ## `dev`

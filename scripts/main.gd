@@ -12,6 +12,7 @@ extends SceneTree
 ##   watch       resident updater: keeps every map of a config current around the chunks the server saves
 ##   zoom        rebuild zoom-out levels without rendering
 ##   build-data  extract blocks, models, textures and biomes from a Minecraft client jar
+##   shot        one perspective picture of a map (PNG + camera transform), see docs/render-api.md
 ##   dev         debugging helpers (dump, column, topblocks, colblocks, encodetest, zoomtest)
 ##
 ## Options are `--key value` or `--flag`; see each command's class for the full list.
@@ -34,8 +35,10 @@ func _initialize() -> void:
 			code = await JobCmds.zoom(args)
 		"build-data":
 			code = BuildData.run(args)
+		"shot":
+			code = ShotCmd.run(args)
 		"dev":
 			code = DevCmd.run(args)
 		_:
-			print("usage: main.gd -- render|scan|run|watch|zoom|build-data|dev [options]")
+			print("usage: main.gd -- render|scan|run|watch|zoom|build-data|shot|dev [options]")
 	quit(code)

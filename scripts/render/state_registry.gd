@@ -37,6 +37,8 @@ static var _name_re := RegEx.create_from_string("^([a-z0-9_.-]+:)?[a-z0-9_/.-]+$
 var data_dir := ""
 var tex_names := PackedStringArray()
 var tex_index := {}
+## entity sheet name -> size in 16x16 tiles; sheets are cut into "entity/<sheet>#<tx>,<ty>" textures
+var entity_sheets := {}
 ## per texture: 1 when every texel of the 16x16 sprite is fully opaque
 var tex_opaque := PackedByteArray()
 var tex_rgba := PackedByteArray()
@@ -93,6 +95,12 @@ func load_dir(dir: String) -> bool:
 		_defaults = JSON.parse_string(df.get_as_text())
 	else:
 		push_warning("block_defaults.json missing; default block properties unavailable")
+	var ef := FileAccess.open(dir.path_join("entity_textures.json"), FileAccess.READ)
+	if ef != null:
+		var ej = JSON.parse_string(ef.get_as_text())
+		if ej is Dictionary:
+			for k in ej:
+				entity_sheets[k] = Vector2i(int(ej[k][0]), int(ej[k][1]))
 	water_tex = tex_id("block/water_still")
 	lava_tex = tex_id("block/lava_still")
 	_add_state("minecraft:air", true)
@@ -277,7 +285,12 @@ func _build(full_name: String, props: Dictionary) -> int:
 	for vr in _select_variants(def, props):
 		var m = _resolve_model(vr["model"])
 		if m != null and not (m["elements"] as Array).is_empty():
-			_bake(m, vr["x"], vr["y"], qpos, qmeta)
+			_bake(m, vr["x"], vr["y"], bool(vr.get("uvlock", false)), qpos, qmeta)
+	if qpos.is_empty():
+		# no model geometry: the client draws this block from code (a block entity)
+		var et := _bake_entity(n, props, qpos, qmeta)
+		if et >= 0:
+			s_tint[sid] = TINT_FIXED | et
 	var nq := qmeta.size() / 5
 	var all_opaque := true
 	for q in nq:
@@ -508,11 +521,38 @@ static func _dir_from_vec(v: Array) -> int:
 	return SOUTH if v[2] >= 0.0 else NORTH
 
 
-func _bake(model: Dictionary, rx: int, ry: int, qpos: PackedFloat32Array, qmeta: PackedInt32Array) -> void:
+func _bake(model: Dictionary, rx: int, ry: int, uvlock: bool, qpos: PackedFloat32Array, qmeta: PackedInt32Array) -> void:
 	var nx := ((rx / 90) % 4 + 4) % 4
 	var ny := ((ry / 90) % 4 + 4) % 4
 	var textures: Dictionary = model["textures"]
 	for el in model["elements"]:
+		# uvlock pins the texture to the world: the face UVs come from the element's bounds
+		# after every rotation (the element's own and the blockstate's), not from the model
+		var lock_from := []
+		var lock_to := []
+		if uvlock:
+			var mn := [1e9, 1e9, 1e9]
+			var mx := [-1e9, -1e9, -1e9]
+			for cx in [el["from"][0], el["to"][0]]:
+				for cy in [el["from"][1], el["to"][1]]:
+					for cz in [el["from"][2], el["to"][2]]:
+						var cp := [cx, cy, cz]
+						var erot = el["rot"]
+						if erot != null:
+							cp = _rotate_point(cp, erot[0], erot[1], erot[2], erot[3])
+						for _k in nx:
+							var cc := [_r(cp[0] - 8.0), _r(cp[1] - 8.0), _r(cp[2] - 8.0)]
+							var cr := _rot_x90(cc)
+							cp = [_r(cr[0] + 8.0), _r(cr[1] + 8.0), _r(cr[2] + 8.0)]
+						for _k in ny:
+							var cc2 := [_r(cp[0] - 8.0), _r(cp[1] - 8.0), _r(cp[2] - 8.0)]
+							var cr2 := _rot_y90(cc2)
+							cp = [_r(cr2[0] + 8.0), _r(cr2[1] + 8.0), _r(cr2[2] + 8.0)]
+						for k in 3:
+							mn[k] = minf(mn[k], cp[k])
+							mx[k] = maxf(mx[k], cp[k])
+			lock_from = mn
+			lock_to = mx
 		for df in el["faces"]:
 			var d: int = df[0]
 			var face: Dictionary = df[1]
@@ -561,6 +601,9 @@ func _bake(model: Dictionary, rx: int, ry: int, qpos: PackedFloat32Array, qmeta:
 				_r(_r(e1[2] * e2[0]) - _r(e1[0] * e2[2])),
 				_r(_r(e1[0] * e2[1]) - _r(e1[1] * e2[0]))]
 			var normal := _dir_from_vec(nrm)
+			if uvlock:
+				var luv := _default_uv(normal, lock_from, lock_to)
+				uvs = [[luv[0], luv[1]], [luv[0], luv[3]], [luv[2], luv[3]], [luv[2], luv[1]]]
 			for i in 4:
 				qpos.append(verts[i][0] / 16.0)
 				qpos.append(verts[i][1] / 16.0)
@@ -686,3 +729,264 @@ func _select_variants(def: Dictionary, props: Dictionary) -> Array:
 		if part["when"] == null or _cond_matches(part["when"], props):
 			out.append(part["apply"])
 	return out
+
+
+# ---------------------------------------------------------------------------------------------
+# Block entities: blocks the client draws from code, not from a block model (chests, banners,
+# skulls and heads, shulker boxes). Baked here from built-in box definitions that mirror the
+# client's own entity models, textured from the client's entity sheets (build-data extracts
+# them as 16x16 tiles named "entity/<sheet>#<tx>,<ty>", with the sheet sizes in
+# entity_textures.json). Boxes use the entity box-UV layout: for a box with texture offset
+# (u, v) and size (dx, dy, dz), the faces take these regions of the sheet (sheet pixels,
+# v downwards):
+#   up (u+dz, v, dx, dz)          down (u+dz+dx, v, dx, dz)
+#   west (u, v+dz, dz, dy)        north (u+dz, v+dz, dx, dy)
+#   east (u+dz+dx, v+dz, dz, dy)  south (u+dz+dx+dz, v+dz, dx, dy)
+# A face region is split at sheet tile borders so every emitted quad samples one 16x16 texture.
+# Sign text and banner patterns live in block-entity data the region files do not carry in the
+# block states, so banners are baked in their base colour and signs keep their block model.
+
+const DYE_COLORS := {
+	"white": 0xF9FFFE, "orange": 0xF9801D, "magenta": 0xC74EBD, "light_blue": 0x3AB3DA,
+	"yellow": 0xFED83D, "lime": 0x80C71F, "pink": 0xF38BAA, "gray": 0x474F52,
+	"light_gray": 0x9D9D97, "cyan": 0x169C9C, "purple": 0x8932B8, "blue": 0x3C44AA,
+	"brown": 0x835432, "green": 0x5E7C16, "red": 0xB02E26, "black": 0x1D1D21,
+}
+
+## Blockstate y rotations for a model whose front faces +z (south). _rotate_point turns the
+## other way than the blockstate rotation, so the angles are negated.
+static func _facing_rots(facing: String) -> Array:
+	match facing:
+		"west":
+			return [["y", -90.0]]
+		"north":
+			return [["y", 180.0]]
+		"east":
+			return [["y", 90.0]]
+	return []
+
+
+## Bakes the block-entity model of block n into qpos/qmeta (nothing when n has none).
+## Returns the fixed tint colour for states that carry one (banner cloth), else -1.
+func _bake_entity(n: String, props: Dictionary, qpos: PackedFloat32Array, qmeta: PackedInt32Array) -> int:
+	var base := n.substr(6) if n.begins_with("waxed_") else n
+	match base:
+		"chest", "trapped_chest", "ender_chest", "copper_chest", "exposed_copper_chest", "weathered_copper_chest", "oxidized_copper_chest":
+			_bake_chest(base, props, qpos, qmeta)
+			return -1
+		"shulker_box":
+			_bake_shulker("entity/shulker/shulker", props, qpos, qmeta)
+			return -1
+		"skeleton_skull", "skeleton_wall_skull":
+			_bake_head("entity/skeleton/skeleton", props, base.ends_with("wall_skull"), false, qpos, qmeta)
+			return -1
+		"wither_skeleton_skull", "wither_skeleton_wall_skull":
+			_bake_head("entity/skeleton/wither_skeleton", props, base.ends_with("wall_skull"), false, qpos, qmeta)
+			return -1
+		"zombie_head", "zombie_wall_head":
+			_bake_head("entity/zombie/zombie", props, base.ends_with("wall_head"), false, qpos, qmeta)
+			return -1
+		"creeper_head", "creeper_wall_head":
+			_bake_head("entity/creeper/creeper", props, base.ends_with("wall_head"), false, qpos, qmeta)
+			return -1
+		"piglin_head", "piglin_wall_head":
+			_bake_head("entity/piglin/piglin", props, base.ends_with("wall_head"), false, qpos, qmeta)
+			return -1
+		"dragon_head", "dragon_wall_head":
+			_bake_head("entity/enderdragon/dragon", props, base.ends_with("wall_head"), true, qpos, qmeta)
+			return -1
+		"player_head", "player_wall_head":
+			# the owner profile is block-entity data; the shape is drawn with the default skin
+			_bake_head("entity/player/wide/steve", props, base.ends_with("wall_head"), false, qpos, qmeta)
+			return -1
+	if base.ends_with("_shulker_box"):
+		var color := base.trim_suffix("_shulker_box")
+		_bake_shulker("entity/shulker/shulker_" + color, props, qpos, qmeta)
+		return -1
+	if base.ends_with("_banner") or base.ends_with("_wall_banner"):
+		return _bake_banner(base, props, qpos, qmeta)
+	return -1
+
+
+func _bake_chest(n: String, props: Dictionary, qpos: PackedFloat32Array, qmeta: PackedInt32Array) -> void:
+	var kind := "normal"
+	match n:
+		"trapped_chest":
+			kind = "trapped"
+		"ender_chest":
+			kind = "ender"
+		"copper_chest":
+			kind = "copper"
+		"exposed_copper_chest":
+			kind = "copper_exposed"
+		"weathered_copper_chest":
+			kind = "copper_weathered"
+		"oxidized_copper_chest":
+			kind = "copper_oxidized"
+	var type: String = props.get("type", "single")
+	var sheet := "entity/chest/" + kind
+	if type == "left":
+		sheet += "_left"
+	elif type == "right":
+		sheet += "_right"
+	var rots := _facing_rots(props.get("facing", "south"))
+	# canonical: front towards +z (south); a double chest's left half has its partner at -x and
+	# its sheet leaves the seam (west) face blank, the right half mirrors that
+	var x0 := 1.0
+	var x1 := 15.0
+	if type == "left":
+		x0 = 0.0
+	elif type == "right":
+		x1 = 16.0
+	var w := x1 - x0
+	_entity_box(qpos, qmeta, Vector3(x0, 0, 1), Vector3(x1, 10, 15), sheet, Vector2(0, 19), Vector3(w, 10, 14), 1.0, -1, rots)
+	_entity_box(qpos, qmeta, Vector3(x0, 9, 1), Vector3(x1, 14, 15), sheet, Vector2(0, 0), Vector3(w, 5, 14), 1.0, -1, rots)
+	if type != "right":
+		# the latch sits on the front, centred on the seam of a double chest
+		var lx := 7.0
+		if type == "left":
+			lx = -1.0
+		_entity_box(qpos, qmeta, Vector3(lx, 10, 15), Vector3(lx + 2, 14, 16), "entity/chest/" + kind, Vector2(0, 0), Vector3(2, 4, 1), 1.0, -1, rots)
+
+
+func _bake_shulker(sheet: String, props: Dictionary, qpos: PackedFloat32Array, qmeta: PackedInt32Array) -> void:
+	var rots: Array = []
+	match props.get("facing", "up"):
+		"down":
+			rots = [["x", 180.0]]
+		"north":
+			rots = [["x", -90.0]]
+		"south":
+			rots = [["x", 90.0]]
+		"west":
+			rots = [["z", 90.0]]
+		"east":
+			rots = [["z", -90.0]]
+	_entity_box(qpos, qmeta, Vector3(0, 0, 0), Vector3(16, 8, 16), sheet, Vector2(0, 28), Vector3(16, 8, 16), 1.0, -1, rots)
+	_entity_box(qpos, qmeta, Vector3(0, 4, 0), Vector3(16, 16, 16), sheet, Vector2(0, 0), Vector3(16, 12, 16), 1.0, -1, rots)
+
+
+func _bake_head(sheet: String, props: Dictionary, wall: bool, dragon: bool, qpos: PackedFloat32Array, qmeta: PackedInt32Array) -> void:
+	if dragon:
+		if wall:
+			_entity_box(qpos, qmeta, Vector3(0, 4, 0), Vector3(16, 16, 8), sheet, Vector2(0, 0), Vector3(16, 16, 16), 4.0, -1, _facing_rots(props.get("facing", "south")))
+		else:
+			_entity_box(qpos, qmeta, Vector3(0, 0, 0), Vector3(16, 16, 16), sheet, Vector2(0, 0), Vector3(16, 16, 16), 4.0, -1, [["y", -int(props.get("rotation", "0")) * 22.5]])
+		return
+	if wall:
+		_entity_box(qpos, qmeta, Vector3(4, 4, 0), Vector3(12, 12, 8), sheet, Vector2(0, 0), Vector3(8, 8, 8), 1.0, -1, _facing_rots(props.get("facing", "south")))
+	else:
+		_entity_box(qpos, qmeta, Vector3(4, 0, 4), Vector3(12, 8, 12), sheet, Vector2(0, 0), Vector3(8, 8, 8), 1.0, -1, [["y", -int(props.get("rotation", "0")) * 22.5]])
+
+
+func _bake_banner(n: String, props: Dictionary, qpos: PackedFloat32Array, qmeta: PackedInt32Array) -> int:
+	var wall := n.ends_with("_wall_banner")
+	var cname := n.trim_suffix("_wall_banner").trim_suffix("_banner")
+	var sheet := "entity/banner/banner_base"
+	# the client's banner model is built in units of 2/3 block pixels: pole 42, crossbar 20x2,
+	# cloth 20x40 hanging from the bar; the pole and bar keep the sheet's wood colours, the
+	# cloth takes the banner's dye colour as its tint
+	if wall:
+		var rots := _facing_rots(props.get("facing", "south"))
+		_entity_box(qpos, qmeta, Vector3(1.3333, 14.6667, 0), Vector3(14.6667, 16, 1.3333), sheet, Vector2(0, 42), Vector3(20, 2, 2), 1.0, -1, rots)
+		_entity_box(qpos, qmeta, Vector3(1.3333, -12, 0), Vector3(14.6667, 14.6667, 1.3333), sheet, Vector2(0, 0), Vector3(20, 40, 2), 1.0, 0, rots)
+	else:
+		var rot := int(props.get("rotation", "0"))
+		var rots: Array = [["y", -rot * 22.5]] if rot != 0 else []
+		_entity_box(qpos, qmeta, Vector3(7.3333, 0, 7.3333), Vector3(8.6667, 28, 8.6667), sheet, Vector2(44, 0), Vector3(2, 42, 2), 1.0, -1, rots)
+		_entity_box(qpos, qmeta, Vector3(1.3333, 28, 7.3333), Vector3(14.6667, 29.3333, 8.6667), sheet, Vector2(0, 42), Vector3(20, 2, 2), 1.0, -1, rots)
+		_entity_box(qpos, qmeta, Vector3(1.3333, 1.3333, 7.3333), Vector3(14.6667, 28, 8.6667), sheet, Vector2(0, 0), Vector3(20, 40, 2), 1.0, 0, rots)
+	return DYE_COLORS.get(cname, 0xFFFFFF)
+
+
+## One box of a block-entity model. from/to are the box corners in 16-space (they may leave the
+## block: banner cloth hangs into the block below, a chest latch crosses into the partner half).
+## uv_off/uv_size give the entity box-UV layout in sheet pixels; uv_scale multiplies them (the
+## dragon's sheet is drawn at 4x). tint is the model tintindex written to every face.
+## rots are [axis, degrees] rotations about the block centre, applied in order.
+func _entity_box(qpos: PackedFloat32Array, qmeta: PackedInt32Array, from: Vector3, to: Vector3, sheet: String, uv_off: Vector2, uv_size: Vector3, uv_scale: float, tint: int, rots: Array) -> void:
+	if not entity_sheets.has(sheet):
+		return
+	var dx := uv_size.x
+	var dy := uv_size.y
+	var dz := uv_size.z
+	var u := uv_off.x
+	var v := uv_off.y
+	var regions := {
+		UP: [u + dz, v, dx, dz],
+		DOWN: [u + dz + dx, v, dx, dz],
+		WEST: [u, v + dz, dz, dy],
+		NORTH: [u + dz, v + dz, dx, dy],
+		EAST: [u + dz + dx, v + dz, dz, dy],
+		SOUTH: [u + dz + dx + dz, v + dz, dx, dy],
+	}
+	for d in regions:
+		var r: Array = regions[d]
+		_entity_face(qpos, qmeta, d, from, to, sheet, Rect2(r[0] * uv_scale, r[1] * uv_scale, r[2] * uv_scale, r[3] * uv_scale), tint, rots)
+
+
+func _entity_face(qpos: PackedFloat32Array, qmeta: PackedInt32Array, d: int, from: Vector3, to: Vector3, sheet: String, region: Rect2, tint: int, rots: Array) -> void:
+	var verts := _face_verts(d, [from.x, from.y, from.z], [to.x, to.y, to.z])
+	for i in 4:
+		var p: Array = verts[i]
+		for r in rots:
+			p = _rotate_point(p, r[0], float(r[1]), [8.0, 8.0, 8.0], false)
+		verts[i] = p
+	var tiles: Vector2i = entity_sheets[sheet]
+	var xs := _split_points(region.position.x, region.position.x + region.size.x)
+	var ys := _split_points(region.position.y, region.position.y + region.size.y)
+	for xi in xs.size() - 1:
+		for yi in ys.size() - 1:
+			var a0: float = xs[xi]
+			var a1: float = xs[xi + 1]
+			var b0: float = ys[yi]
+			var b1: float = ys[yi + 1]
+			var tx := int(a0) / 16
+			var ty := int(b0) / 16
+			if tx >= tiles.x or ty >= tiles.y or a1 <= a0 or b1 <= b0:
+				continue
+			var tid := tex_id("%s#%d,%d" % [sheet, tx, ty])
+			var corners := []
+			for c in [[a0, b0], [a0, b1], [a1, b1], [a1, b0]]:
+				var su: float = (c[0] - region.position.x) / region.size.x
+				var sv: float = (c[1] - region.position.y) / region.size.y
+				corners.append([_bilinear(verts, su, sv), [(c[0] - tx * 16) / 16.0, (c[1] - ty * 16) / 16.0]])
+			_emit_entity_quad(qpos, qmeta, corners, tid, tint)
+
+
+static func _split_points(a: float, b: float) -> Array:
+	var out := [a]
+	var t := (floori(a / 16.0) + 1) * 16.0
+	while t < b:
+		out.append(t)
+		t += 16.0
+	out.append(b)
+	return out
+
+
+static func _bilinear(verts: Array, su: float, sv: float) -> Array:
+	var out := [0.0, 0.0, 0.0]
+	var ws := [(1.0 - su) * (1.0 - sv), (1.0 - su) * sv, su * sv, su * (1.0 - sv)]
+	for i in 4:
+		for k in 3:
+			out[k] += verts[i][k] * ws[i]
+	return out
+
+
+## corners: [[position (16-space), [u, v] in 0..1 of one sheet tile] x 4], in _face_verts order
+func _emit_entity_quad(qpos: PackedFloat32Array, qmeta: PackedInt32Array, corners: Array, tid: int, tint: int) -> void:
+	var e1 := [corners[1][0][0] - corners[0][0][0], corners[1][0][1] - corners[0][0][1], corners[1][0][2] - corners[0][0][2]]
+	var e2 := [corners[2][0][0] - corners[0][0][0], corners[2][0][1] - corners[0][0][1], corners[2][0][2] - corners[0][0][2]]
+	var nrm := [e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]]
+	for i in 4:
+		qpos.append(corners[i][0][0] / 16.0)
+		qpos.append(corners[i][0][1] / 16.0)
+		qpos.append(corners[i][0][2] / 16.0)
+	for i in 4:
+		qpos.append(corners[i][1][0])
+		qpos.append(corners[i][1][1])
+	qmeta.append(tid)
+	qmeta.append(tint)
+	qmeta.append(NO_DIR)
+	qmeta.append(_dir_from_vec(nrm))
+	qmeta.append(1)

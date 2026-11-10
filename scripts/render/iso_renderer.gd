@@ -483,7 +483,7 @@ static func _quad_key(vf: PackedFloat32Array, q: int) -> String:
 ## Translucent quads of the GPU mesher back to front: ascending map z (float32 sum of float32 vertex depths computed in
 ## double precision,), ties in the CPU mesher's emission order (chunk, block y/z/x, quad ordinal).
 ## tb: 16 uints per quad (see mesh_chunks.glsl note_quad).
-func _sort_translucent(tb: PackedByteArray, chunks: Array[Vector2i]) -> PackedInt32Array:
+func _sort_translucent(tb: PackedByteArray, chunks: Array[Vector2i], row := PackedFloat64Array()) -> PackedInt32Array:
 	var n := tb.size() / 64
 	var order := PackedInt32Array()
 	if n == 0:
@@ -491,6 +491,9 @@ func _sort_translucent(tb: PackedByteArray, chunks: Array[Vector2i]) -> PackedIn
 	var ints := tb.to_int32_array()
 	var fl := tb.to_float32_array()
 	var m := persp.w2m
+	var zr := PackedFloat64Array([m[6], m[7], m[8]])
+	if row.size() == 3:
+		zr = row
 	var s1 := PackedFloat32Array()
 	var s2 := PackedFloat32Array()
 	var s3 := PackedFloat32Array()
@@ -503,7 +506,7 @@ func _sort_translucent(tb: PackedByteArray, chunks: Array[Vector2i]) -> PackedIn
 		var bz := c.y * 16.0
 		for v in 4:
 			var p := o + 3 + v * 3
-			zv[i * 4 + v] = m[6] * (bx + fl[p]) + m[7] * fl[p + 1] + m[8] * (bz + fl[p + 2])
+			zv[i * 4 + v] = zr[0] * (bx + fl[p]) + zr[1] * fl[p + 1] + zr[2] * (bz + fl[p + 2])
 	s1.resize(n)
 	s2.resize(n)
 	s3.resize(n)

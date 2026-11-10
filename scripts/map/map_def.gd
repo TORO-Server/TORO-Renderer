@@ -3,6 +3,8 @@ extends RefCounted
 ## One Dynmap map: which TiDB MapID it fills, from which region directory, in which perspective.
 
 var id := 0
+## optional caller-facing name; the render API addresses maps by it (or by the numeric id)
+var name := ""
 var region_dir := ""
 var persp_name := "iso_S_90_lowres"
 var zoom_max := 10
@@ -33,6 +35,7 @@ static func load_config(path: String) -> Dictionary:
 static func from_entry(e: Dictionary) -> MapDef:
 	var m := MapDef.new()
 	m.id = int(e.get("id", 0))
+	m.name = str(e.get("name", ""))
 	m.region_dir = e.get("region", "")
 	m.persp_name = e.get("persp", m.persp_name)
 	m.zoom_max = int(e.get("zoom_max", m.zoom_max))
