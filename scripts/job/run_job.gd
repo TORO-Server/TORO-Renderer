@@ -79,6 +79,7 @@ func run() -> int:
 	var pub := Publisher.new(store)
 	pub.candidates = keys
 	pub.only_missing = only_missing
+	pub.mega = map.mega
 	var changed_path := state_dir.path_join("changed-%d.txt" % map.id)
 	var per_run := args.integer("per-run", 8)
 	var limit := args.integer("limit")
@@ -97,8 +98,12 @@ func run() -> int:
 			return _fail("upload failed")
 		_record(changed_path, res["changed"])
 		_keep_png(args.text("keep-png"), tiles)
+		var still: Dictionary = res.get("still_megas", {})
 		for m in group:
-			done["%d,%d" % [m.x, m.y]] = true
+			if still.has(m):
+				Term.say("warning: mega tile %s still has %d missing tiles after rendering; not marked done" % [m, still[m]])
+			else:
+				done["%d,%d" % [m.x, m.y]] = true
 		_save_done(state_path, done)
 		n_done += group.size()
 		Term.say("megas %s..%s [%d/%d] render %.1fs upload %.1fs | %s" % [group[0], group[-1], n_done, todo.size(), (t1 - t0) / 1000.0, (Time.get_ticks_msec() - t1) / 1000.0, res["text"]])
