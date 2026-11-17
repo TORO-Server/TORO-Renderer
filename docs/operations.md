@@ -32,7 +32,7 @@
 
 ```json
 {
-  "db": { "host": "tidb", "port": 4000, "user": "renderer", "password_file": "/run/secrets/db_password", "database": "dynmap" },
+  "db": { "host": "db.example.test", "port": 4000, "user": "renderer", "password_file": "/run/secrets/db_password", "database": "dynmap" },
   "live": "wss://map.example.net/up/ws",
   "maps": [
     { "id": 30002, "region": "/worlds/flat/region", "persp": "iso_SE_30_hires", "zoom_max": 7 }

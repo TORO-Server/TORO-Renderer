@@ -614,9 +614,9 @@ func _args(words: Array) -> Args:
 func _test_config() -> void:
 	OS.unset_environment("DYNMAP_DB_PASSWORD")
 	OS.unset_environment("DYNMAP_DB_PASSWORD_FILE")
-	var cfg := {"db": {"host": "tidb", "port": 4000, "user": "renderer", "database": "dynmap"}}
+	var cfg := {"db": {"host": "db.example.test", "port": 4000, "user": "renderer", "database": "dynmap"}}
 	var db := MapDef.db_config(_args(["run"]), cfg)
-	_eq("host from the config", db.get("host"), "tidb")
+	_eq("host from the config", db.get("host"), "db.example.test")
 	_eq("user from the config", db.get("user"), "renderer")
 	_ok("no password configured", not db.has("password"))
 	_eq("the config is not modified", cfg["db"].has("password"), false)
@@ -644,7 +644,7 @@ func _test_config() -> void:
 	_eq("no connection without the password", store.connect_db(), false)
 	_ok("the store reports why", store.error.contains("password file"))
 	var nobody := TileStore.new()
-	nobody.configure({"host": "tidb"})
+	nobody.configure({"host": "db.example.test"})
 	_eq("no connection without a user", nobody.connect_db(), false)
 	_ok("the store asks for a user", nobody.error.contains("user"))
 
