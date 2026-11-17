@@ -40,7 +40,7 @@ services:
       - /srv/minecraft/worlds:/worlds:ro      # the directory holding the region folders named in maps.json
 
 networks:
-  # An existing Docker network where the database answers as "tidb" (see "db" in maps.json).
+  # An existing Docker network where the database answers under the host name set in "db" of maps.json.
   # Named by the game stack's compose file; set DB_NETWORK if yours differs.
   database:
     external: true

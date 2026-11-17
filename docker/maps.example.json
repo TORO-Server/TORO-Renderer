@@ -1,5 +1,5 @@
 {
-  "db": { "host": "tidb", "port": 4000, "user": "renderer", "password_file": "/run/secrets/db_password", "database": "dynmap" },
+  "db": { "host": "db.example.test", "port": 4000, "user": "renderer", "password_file": "/run/secrets/db_password", "database": "dynmap" },
   "live": "wss://map.example.net/up/ws",
   "maps": [
     { "id": 1, "name": "overworld", "region": "/worlds/overworld/region", "persp": "iso_SE_30_hires", "zoom_max": 12 },
