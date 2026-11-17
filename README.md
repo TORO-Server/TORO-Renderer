@@ -1,8 +1,8 @@
 # TORO-Renderer
 
-内蔵 GPU (Vulkan) で動く、Dynmap 互換のマップタイルレンダラーです。
-Godot 4.7 の 1 つのプロジェクトで、処理は GDScript、重い計算は GLSL で書いています。
-Minecraft の Anvil ワールドを読み、ブロックモデルをそのままラスタライズして、Dynmap の TiDB タイル表
+内蔵 GPU (Vulkan: 画像処理用の標準的な仕組み) で動く、Dynmap 互換のマップタイルレンダラーです。
+Godot 4.7 の 1 つのプロジェクトで、処理は GDScript (Godot 用のスクリプト言語)、重い計算は GLSL (GPU 用のプログラム言語) で書いています。
+Minecraft の Anvil (Minecraft のワールドの保存形式) ワールドを読み、ブロックモデルをそのままラスタライズ (モデルを画素の絵にする処理) して、Dynmap の TiDB (データベース) タイル表
 （`dynmap_Tiles`）へ zoom-out レベルまで含めて書き込む。
 
 - Dynmap の標準的な 4 つの視点を描画できる: `iso_S_90_lowres` / `iso_S_90_hires` /
@@ -40,12 +40,12 @@ godot --path . -s scripts/main.gd -- <コマンド> [--オプション 値] [--�
 ```
 scripts/main.gd     コマンドの振り分け
 scripts/cli/        引数解析（Args）、ログと待機（Term）
-scripts/render/     NBT、チャンク復号、ブロックモデル → クアッド、GPU メッシャー、ラスタライザー、視点
+scripts/render/     NBT、チャンク復号、ブロックモデル → クアッド (四角形の面)、GPU メッシャー (ブロックを描画用の面にまとめる処理)、ラスタライザー、視点
 scripts/store/      Mysql（プロトコル実装）、TileStore（dynmap_Tiles）、ZoomBuilder
-scripts/map/        MapDef、ScanCache、Planner（タイル・メガタイル計画）、AnvilChanges（変更検出）
-scripts/job/        RendererPool、Publisher、RunJob、WatchJob、Gate（静穏判定）、LiveFeed（プレイヤー位置）
+scripts/map/        MapDef、ScanCache、Planner（タイル・メガタイル (一度に描く大きな区画) 計画）、AnvilChanges（変更検出）
+scripts/job/        RendererPool、Publisher、RunJob、WatchJob、Gate（静穏判定: 負荷やプレイヤーの有無から、描いてよいかを調べる処理）、LiveFeed（プレイヤー位置）
 scripts/cmd/        各コマンドの実装
-shaders/            mesh_chunks（メッシャー）、raster、finish（非乗算化）、zoom（2x2 平均）
+shaders/            mesh_chunks（メッシャー）、raster、finish（非乗算化: 合成済みの色を元の色に戻す処理）、zoom（2x2 平均）
 docker/             Dockerfile、起動スクリプト、compose、設定例
 tools/              PowerShell の補助スクリプト（ローカル実行、公開）
 docs/               詳細な文書
