@@ -47,7 +47,7 @@ scripts/job/        RendererPool、Publisher、RunJob、WatchJob、Gate（静穏
 scripts/cmd/        各コマンドの実装
 shaders/            mesh_chunks（メッシャー）、raster、finish（非乗算化）、zoom（2x2 平均）
 docker/             Dockerfile、起動スクリプト、compose、設定例
-tools/              PowerShell の補助スクリプト（ローカル実行、デプロイ）
+tools/              PowerShell の補助スクリプト（ローカル実行、公開）
 docs/               詳細な文書
 ```
 
@@ -60,6 +60,6 @@ docs/               詳細な文書
 | [docs/commands.md](docs/commands.md) | コマンドごとのオプション一覧 |
 | [docs/render-api.md](docs/render-api.md) | 透視カメラの静止画と、watch が待ち受ける描画要求 API（英語） |
 
-Minecraft のアセット（テクスチャ、モデル、ブロック状態）はリポジトリに含まれない。`build-data` が、利用者が持つ
+Minecraft のアセット（テクスチャ、モデル、ブロック状態）は置き場に含まれない。`build-data` が、利用者が持つ
 クライアント jar から取り出す。ワールド → マップの変換式、シェーディング、タイルの形式は Dynmap（Apache License 2.0）の
 仕様に合わせて実装している。
