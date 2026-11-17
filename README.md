@@ -45,7 +45,7 @@ scripts/store/      Mysql（プロトコル実装）、TileStore（dynmap_Tiles�
 scripts/map/        MapDef、ScanCache、Planner（タイル・メガタイル (一度に描く大きな区画) 計画）、AnvilChanges（変更検出）
 scripts/job/        RendererPool、Publisher、RunJob、WatchJob、Gate（静穏判定: 負荷やプレイヤーの有無から、描いてよいかを調べる処理）、LiveFeed（プレイヤー位置）
 scripts/cmd/        各コマンドの実装
-shaders/            mesh_chunks（メッシャー）、raster、finish（非乗算化: 合成済みの色を元の色に戻す処理）、zoom（2x2 平均）
+shaders/            mesh_chunks（メッシャー）、raster、finish（非乗算化: 透明度を掛けてある色を、元の色に戻す処理）、zoom（2x2 平均）
 docker/             Dockerfile、起動スクリプト、compose、設定例
 tools/              PowerShell の補助スクリプト（ローカル実行、公開）
 docs/               詳細な文書
