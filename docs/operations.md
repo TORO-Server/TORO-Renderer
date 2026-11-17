@@ -9,7 +9,7 @@
    ```
 2. **ローカル実行**（Vulkan 対応 GPU、64x64 の小さなウィンドウが開く。`--gpu-index N` でデバイスを選ぶ）:
    ```
-   tools\run-local.ps1 -Region C:\worlds\flat\region -Tiles "-8,4,2,2" -Out out -Extra "--persp iso_SE_30_hires"
+   tools\run-local.ps1 -Region <ワールドの region フォルダ> -Tiles "-8,4,2,2" -Out out -Extra "--persp iso_SE_30_hires"
    ```
 3. **コンテナ**（Mesa と、画面の無い Wayland コンポジタ。下の「なぜコンテナに Wayland コンポジタがあるのか」を参照）:
    ```
@@ -172,11 +172,5 @@ godot --headless --path . -s tests/run_tests.gd
 
 Godot の `--headless` には `RenderingDevice` が無く、Xvfb には DRI3 が無いため Mesa が llvmpipe（CPU）に落ちる。
 wlroots の headless バックエンドを使う `cage` を入れると、Godot が内蔵 GPU のレンダーノード上で Vulkan を使える
-（`docker/entrypoint.sh`）。Forward+ は起動に約 8 秒余計にかかるので、Mobile レンダラーを使う。GPU が要らないコマンド
+（`docker/entrypoint.sh`）。起動を軽くするため、Mobile レンダラーを使う。GPU が要らないコマンド
 （`scan`、`build-data`、`dev`、`run --count-missing`）は `--headless` でも動く。
-
-## 速度の目安
-
-8×8 のメガタイル（64 タイル、114 万クアッド、`iso_SE_30_hires`）が、低優先度のコンテナの UHD 730 で、描画 1.3 秒
-（パック 0.76、メッシュ 0.46、ラスタ 0.05）+ ハッシュ・WebP 0.25 秒。同じ範囲を CPU のメッシャーで描くと数分かかる。
-GDScript の NBT 解析（1 チャンク約 1.7 ms）が最大の負担になっている。
