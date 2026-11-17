@@ -2,7 +2,7 @@
 
 ## セットアップ
 
-1. **描画用データ**を Minecraft のクライアント jar から作る（リポジトリには含めない）。`--reports` はデータジェネレーターの
+1. **描画用データ**を Minecraft のクライアント jar から作る（置き場には含めない）。`--reports` はデータジェネレーターの
    `reports/blocks.json`（ブロックの既定プロパティ用）。約 10 秒で終わり、出力は `data/` へ。
    ```
    godot --headless --path . -s scripts/main.gd -- build-data --jar client-26.3.jar --reports blocks.json --out data
